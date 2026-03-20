@@ -90,7 +90,15 @@ def get_smart_path(folder_name):
 
 
 def save_audio_file(temp_folder, subfolder, text_snippet):
-    save_path = os.path.join(BASE_OUTPUT_DIR, subfolder)
+    # Sanitize subfolder to prevent path traversal
+    safe_subfolder = re.sub(r'[^\w\s\-]', '', subfolder).strip() or "output"
+    save_path = os.path.join(BASE_OUTPUT_DIR, safe_subfolder)
+    # Verify we stay within output directory
+    real_save = os.path.realpath(save_path)
+    real_base = os.path.realpath(BASE_OUTPUT_DIR)
+    if not real_save.startswith(real_base):
+        print("Error: Invalid output path")
+        return
     os.makedirs(save_path, exist_ok=True)
 
     timestamp = datetime.now().strftime("%H-%M-%S")
@@ -120,7 +128,13 @@ def clean_path(user_input):
     path = user_input.strip()
     if len(path) > 1 and path[0] in ["'", '"'] and path[-1] == path[0]:
         path = path[1:-1]
-    return path.replace("\\ ", " ")
+    path = path.replace("\\ ", " ")
+    # Reject null bytes and excessively long paths
+    if "\0" in path:
+        raise ValueError("Path contains null byte")
+    if len(path) > 1024:
+        raise ValueError("Path too long (max 1024 chars)")
+    return path
 
 
 def get_safe_input(prompt="\nEnter text (or drag .txt file): "):
@@ -128,9 +142,21 @@ def get_safe_input(prompt="\nEnter text (or drag .txt file): "):
         raw_input = input(prompt).strip()
         if raw_input.lower() in ['exit', 'quit', 'q']:
             return None
+        if not raw_input:
+            return None
 
-        clean_p = clean_path(raw_input)
+        try:
+            clean_p = clean_path(raw_input)
+        except ValueError as e:
+            print(f"Error: {e}")
+            return None
+
         if os.path.exists(clean_p) and clean_p.endswith(".txt"):
+            # Validate file size before reading (max 1MB)
+            file_size = os.path.getsize(clean_p)
+            if file_size > 1_000_000:
+                print(f"Error: File too large ({file_size} bytes, max 1MB)")
+                return None
             print(f"Reading from: {os.path.basename(clean_p)}")
             try:
                 with open(clean_p, 'r', encoding='utf-8') as f:
@@ -138,6 +164,10 @@ def get_safe_input(prompt="\nEnter text (or drag .txt file): "):
             except IOError as e:
                 print(f"Error reading file: {e}")
                 return None
+
+        if len(raw_input) > 50000:
+            print("Error: Input too long (max 50,000 chars)")
+            return None
 
         return raw_input
     except KeyboardInterrupt:
@@ -188,8 +218,14 @@ def enroll_new_voice():
     name = input("1. Voice name (e.g. Boss, Mom): ").strip()
     if not name:
         return
+    if len(name) > 100:
+        print("Error: Voice name too long (max 100 chars)")
+        return
 
     safe_name = re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_')
+    if not safe_name:
+        print("Error: Voice name contains no valid characters")
+        return
 
     ref_input = input("2. Drag & Drop Reference File: ").strip()
     raw_path = clean_path(ref_input)
