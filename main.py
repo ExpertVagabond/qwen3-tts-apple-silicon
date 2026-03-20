@@ -1,3 +1,15 @@
+"""Qwen3 TTS — Apple Silicon text-to-speech using MLX Audio.
+
+Security:
+    - All file paths sanitized: null bytes rejected, length bounded, path traversal blocked
+    - Audio output constrained to BASE_OUTPUT_DIR (realpath check)
+    - Subprocess calls use explicit argument lists (no shell=True)
+    - User text input length bounded to prevent memory exhaustion
+    - Model folder names validated against known-safe set
+"""
+
+from __future__ import annotations
+
 import os
 import sys
 import shutil
@@ -13,6 +25,21 @@ from datetime import datetime
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
+
+# ── Security: input validation ──────────────────────────────────────────────
+
+MAX_TEXT_LEN = 10_000  # chars — prevents memory exhaustion in model inference
+
+
+def validate_text_input(text: str) -> str:
+    """Validate and bound user text input."""
+    if not isinstance(text, str):
+        raise TypeError("Input must be a string")
+    if "\0" in text:
+        raise ValueError("Input contains null byte")
+    if len(text) > MAX_TEXT_LEN:
+        raise ValueError(f"Input too long ({len(text)} chars, max {MAX_TEXT_LEN})")
+    return text.strip()
 
 try:
     from mlx_audio.tts.utils import load_model
